@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CV Scanner AI</title>
+    <link rel="stylesheet" href="App.css">
+    <!-- Add Font Awesome for icons if desired, e.g., for browse buttons -->
+    <!-- <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css"> -->
+</head>
+<body>
+
+    <div class="App">
+        <div class="container">
+            <h1>CV Scanner AI</h1>
+
+            <!-- Hidden file inputs triggered by buttons -->
+            <!-- Added name attributes for backend identification -->
+            <input type="file" id="criteriaFileInput" name="criteriaFile" style="display: none;" accept=".pdf">
+            <!-- Use cvFiles[] for backend getlist -->
+            <input type="file" id="cvsFileInput" name="cvFiles[]" style="display: none;" accept=".pdf" multiple>
+
+            <div class="form-row">
+                <label for="modelName">AI Model:</label>
+                <input type="text" id="modelName" placeholder="e.g., gemini-1.5-flash-latest">
+                <button id="saveModelBtn">Save</button>
+            </div>
+
+            <div class="form-row">
+                <label for="criteriaFile">Criteria:</label>
+                <input type="text" id="criteriaFileText" placeholder="No file selected" readOnly> <!-- Changed ID -->
+                <button id="browseCriteriaBtn">Browse</button>
+            </div>
+
+            <div class="form-row">
+                <label for="cvsFiles">CVs:</label>
+                <input type="text" id="cvsFilesText" placeholder="No file(s) selected" readOnly> <!-- Changed ID -->
+                <button id="browseCvsBtn">Browse</button>
+            </div>
+
+            <div class="form-row score-row">
+                <label for="maxRating">Max Rating:</label>
+                <select id="maxRating">
+                    <option value="4">4</option>
+                    <option value="5">5</option>
+                    <option value="10" selected>10</option>
+                    <option value="40">40</option>
+                    <option value="50">50</option>
+                    <option value="100">100</option>
+                </select>
+
+                <label for="minRating">Min Rating:</label>
+                <select id="minRating">
+                    <option value="2">2</option>
+                    <option value="3">3</option>
+                    <option value="5" selected>5</option>
+                    <option value="20">20</option>
+                    <option value="25">25</option>
+                    <option value="50">50</option>
+                </select>
+            </div>
+
+            <div class="action-buttons">
+                 <button id="inputApiBtn">Input API Key</button>
+                 <button id="sendBtn">Send</button>
+            </div>
+
+            <div id="messageArea" class="message" style="display: none;"></div>
+            <div id="loader" class="loader" style="display: none;"></div>
+
+            <div class="output-section">
+                 <label for="outputText">Output:</label>
+                 <textarea id="outputText" readOnly></textarea>
+                 <button id="exportBtn">Export</button>
+            </div>
+
+        </div><!-- /container -->
+    </div><!-- /App -->
+
+    <!-- API Key Modal -->
+    <div id="apiModal" class="modal-overlay" style="display: none;">
+        <div class="modal-content">
+            <h2>Enter API Key</h2>
+            <p>Enter your Google AI Studio API Key. This will be stored locally in your browser.</p>
+            <input type="password" id="apiKeyInput" placeholder="Paste your API key here">
+            <div class="modal-actions">
+                <button id="saveApiBtn">Save</button>
+                <button id="cancelApiBtn">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- Element References ---
+        const modelNameInput = document.getElementById('modelName');
+        const saveModelBtn = document.getElementById('saveModelBtn');
+        const criteriaFileInput = document.getElementById('criteriaFileInput');
+        const criteriaFileText = document.getElementById('criteriaFileText'); // Updated ID
+        const browseCriteriaBtn = document.getElementById('browseCriteriaBtn');
+        const cvsFileInput = document.getElementById('cvsFileInput');
+        const cvsFilesText = document.getElementById('cvsFilesText'); // Updated ID
+        const browseCvsBtn = document.getElementById('browseCvsBtn');
+        const maxRatingSelect = document.getElementById('maxRating');
+        const minRatingSelect = document.getElementById('minRating');
+        const inputApiBtn = document.getElementById('inputApiBtn');
+        const sendBtn = document.getElementById('sendBtn');
+        const messageArea = document.getElementById('messageArea');
+        const loader = document.getElementById('loader');
+        const outputText = document.getElementById('outputText');
+        const exportBtn = document.getElementById('exportBtn');
+
+        // Modal elements
+        const apiModal = document.getElementById('apiModal');
+        const apiKeyInput = document.getElementById('apiKeyInput');
+        const saveApiBtn = document.getElementById('saveApiBtn');
+        const cancelApiBtn = document.getElementById('cancelApiBtn');
+
+        // --- State Variables ---
+        // Store the actual File objects
+        let criteriaFileObject = null;
+        let cvsFileObjects = [];
+
+        // --- Functions ---
+
+        function showMessage(text, type = 'status') {
+            messageArea.textContent = text;
+            messageArea.className = `message ${type === 'error' ? 'error-message' : 'status-message'}`;
+            messageArea.style.display = 'block';
+            // Scroll to message if needed
+            messageArea.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+
+        function hideMessage() {
+            messageArea.style.display = 'none';
+        }
+
+        function setLoading(isLoading) {
+            loader.style.display = isLoading ? 'block' : 'none';
+            sendBtn.disabled = isLoading;
+            browseCriteriaBtn.disabled = isLoading;
+            browseCvsBtn.disabled = isLoading;
+            inputApiBtn.disabled = isLoading;
+            exportBtn.disabled = isLoading;
+             // Disable form elements during loading
+            modelNameInput.disabled = isLoading;
+            saveModelBtn.disabled = isLoading;
+            maxRatingSelect.disabled = isLoading;
+            minRatingSelect.disabled = isLoading;
+            // Also disable file inputs indirectly via buttons
+        }
+
+        function loadModelName() {
+            const savedModel = localStorage.getItem('cvScannerModelName');
+            if (savedModel) {
+                modelNameInput.value = savedModel;
+            } else {
+                 modelNameInput.placeholder = "gemini-1.5-flash-latest"; // Default placeholder
+            }
+        }
+
+        function saveModelName() {
+            const modelName = modelNameInput.value.trim();
+            if (modelName) {
+                localStorage.setItem('cvScannerModelName', modelName);
+                showMessage('Model name saved locally.', 'status');
+            } else {
+                // Allow saving empty to clear it / use default placeholder
+                localStorage.removeItem('cvScannerModelName');
+                modelNameInput.value = ''; // Clear input field
+                modelNameInput.placeholder = "gemini-1.5-flash-latest";
+                showMessage('Saved model name cleared. Default will be used.', 'status');
+                // showMessage('Please enter a model name to save.', 'error');
+            }
+        }
+
+        function openApiModal() {
+            const savedApi = localStorage.getItem('cvScannerApiKey');
+            apiKeyInput.value = savedApi || '';
+            apiModal.style.display = 'flex';
+            apiKeyInput.focus(); // Focus input when modal opens
+        }
+
+        function closeApiModal() {
+            apiModal.style.display = 'none';
+        }
+
+        function saveApiKey() {
+            const apiKey = apiKeyInput.value.trim();
+            // Basic check - real validation would be more complex
+            if (apiKey) {
+                localStorage.setItem('cvScannerApiKey', apiKey);
+                showMessage('API Key saved locally in browser.', 'status');
+                closeApiModal();
+            } else {
+                // Provide feedback within the modal or using showMessage
+                // alert('Please enter an API key.');
+                showMessage('API Key cannot be empty.', 'error');
+                // Optionally keep modal open:
+                // closeApiModal();
+            }
+        }
+
+        // *** MODIFIED handleSendData ***
+        function handleSendData() {
+            hideMessage();
+            const model = modelNameInput.value.trim() || modelNameInput.placeholder; // Use placeholder if empty
+            const maxRating = parseInt(maxRatingSelect.value, 10);
+            const minRating = parseInt(minRatingSelect.value, 10);
+            const apiKey = localStorage.getItem('cvScannerApiKey');
+
+            // --- Validation ---
+            if (!criteriaFileObject) { // Check the file object
+                showMessage('Error: Please select a Criteria file.', 'error');
+                return;
+            }
+            if (cvsFileObjects.length === 0) { // Check the file objects array
+                showMessage('Error: Please select at least one CV file.', 'error');
+                return;
+            }
+            if (minRating >= maxRating) {
+                showMessage('Error: Minimum rating must be smaller than Maximum rating.', 'error');
+                return;
+            }
+             if (!apiKey) {
+                showMessage('Error: API Key not set. Please use "Input API Key".', 'error');
+                openApiModal(); // Prompt user to enter API key
+                return;
+            }
+
+            // --- Prepare FormData for Backend Call ---
+            setLoading(true);
+            showMessage('Uploading files and processing... This may take a moment.', 'status');
+            outputText.value = ''; // Clear previous output
+
+            const formData = new FormData();
+            formData.append('apiKey', apiKey);
+            formData.append('modelName', model);
+            formData.append('maxRating', maxRating.toString());
+            formData.append('minRating', minRating.toString());
+            formData.append('criteriaFile', criteriaFileObject, criteriaFileObject.name); // Append the file object
+
+            // Append each CV file object
+            cvsFileObjects.forEach((file) => {
+                formData.append('cvFiles[]', file, file.name); // Use 'cvFiles[]' to match backend getlist
+            });
+
+            console.log("--- Sending data to backend ---");
+            // Don't log file objects directly, just info
+            console.log("Model:", model);
+            console.log("Criteria File:", criteriaFileObject ? criteriaFileObject.name : 'None');
+            console.log("CV Files:", cvsFileObjects.map(f => f.name));
+            console.log("Max Rating:", maxRating);
+            console.log("Min Rating:", minRating);
+            console.log("API Key:", apiKey ? '********' : 'None');
+            console.log("---------------------------------");
+
+
+            // --- Actual backend API call using fetch() ---
+            fetch('http://127.0.0.1:5000/process', { // Use the correct backend URL
+                method: 'POST',
+                body: formData // FormData sets the Content-Type header automatically
+            })
+            .then(response => {
+                // Check if response is ok (status in the range 200-299)
+                if (!response.ok) {
+                    // If not ok, try to parse error JSON from backend, otherwise use status text
+                    return response.json().then(errData => {
+                        // Throw an error that includes the message from the backend
+                        throw new Error(errData.error || `Server error: ${response.statusText} (Status: ${response.status})`);
+                    }).catch(() => {
+                        // If parsing JSON fails (e.g., HTML error page), throw generic error
+                         throw new Error(`Server error: ${response.statusText} (Status: ${response.status})`);
+                    });
+                }
+                return response.json(); // Parse JSON response body
+            })
+            .then(data => {
+                // --- Success ---
+                if (data.result) {
+                    outputText.value = data.result;
+                    showMessage('Processing DONE!', 'status');
+                } else {
+                     // Handle cases where backend might return 200 but no result (shouldn't happen with current backend)
+                     throw new Error("Received success status but no result data from server.");
+                }
+            })
+            .catch(error => {
+                // --- Handle errors from fetch or thrown errors ---
+                console.error('Error during processing:', error);
+                // Display the specific error message caught
+                showMessage(`Error: ${error.message}`, 'error');
+                outputText.value = `Processing failed.\nError details:\n${error.message}`; // Show error in output too
+            })
+            .finally(() => {
+                // --- Always run after fetch completes (success or error) ---
+                setLoading(false); // Stop loading indicator
+            });
+        }
+
+        function handleExport() {
+            const textToExport = outputText.value;
+            if (!textToExport || textToExport.trim() === '') {
+                showMessage('Error: No content to export.', 'error');
+                return;
+            }
+
+            const blob = new Blob([textToExport], { type: 'text/plain;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = 'Applicants_result_file.txt';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+            showMessage('Output exported.', 'status');
+        }
+
+
+        // --- Event Listeners ---
+        browseCriteriaBtn.addEventListener('click', () => criteriaFileInput.click());
+        browseCvsBtn.addEventListener('click', () => cvsFileInput.click());
+        inputApiBtn.addEventListener('click', openApiModal);
+        sendBtn.addEventListener('click', handleSendData); // Connects to the updated function
+        exportBtn.addEventListener('click', handleExport);
+        saveModelBtn.addEventListener('click', saveModelName);
+
+        // Modal listeners
+        saveApiBtn.addEventListener('click', saveApiKey);
+        cancelApiBtn.addEventListener('click', closeApiModal);
+        apiModal.addEventListener('click', (e) => { // Close modal if overlay is clicked
+             if (e.target === apiModal) {
+                 closeApiModal();
+             }
+        });
+        // Close modal on Escape key
+        document.addEventListener('keydown', (e) => {
+            if (e.key === "Escape" && apiModal.style.display === 'flex') {
+                closeApiModal();
+            }
+        });
+
+
+        criteriaFileInput.addEventListener('change', (event) => {
+            if (event.target.files.length > 0) {
+                criteriaFileObject = event.target.files[0]; // Store the File object
+                criteriaFileText.value = criteriaFileObject.name; // Display filename
+                hideMessage();
+            } else {
+                criteriaFileObject = null;
+                criteriaFileText.value = '';
+                criteriaFileText.placeholder = 'No file selected';
+            }
+             // Reset the input value so 'change' fires even if the same file is selected again
+             event.target.value = null;
+        });
+
+        cvsFileInput.addEventListener('change', (event) => {
+            if (event.target.files.length > 0) {
+                cvsFileObjects = Array.from(event.target.files); // Store File objects
+                cvsFilesText.value = cvsFileObjects.map(f => f.name).join(', '); // Display filenames
+                hideMessage();
+            } else {
+                cvsFileObjects = [];
+                cvsFilesText.value = '';
+                 cvsFilesText.placeholder = 'No file(s) selected';
+            }
+             // Reset the input value
+             event.target.value = null;
+        });
+
+        // --- Initial Load ---
+        loadModelName(); // Load saved model name on startup
+
+    </script>
+
+</body>
+</html>
